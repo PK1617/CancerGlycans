@@ -1,0 +1,88 @@
+#Generation of standard initial weights and biases
+from numpy.random import seed
+seed(101)
+import tensorflow as tf
+tf.compat.v1.random.set_random_seed(101)
+
+#import appropriate libraries
+import pandas as pd
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, GaussianNoise
+from keras.optimizers import Adam, SGD
+from sklearn.model_selection import train_test_split
+from keras.wrappers.scikit_learn import KerasRegressor
+from sklearn.model_selection import cross_val_score, KFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import r2_score, make_scorer
+
+#=======    DEFINING COEFFICIENT OF DETERMINATION (R2) AS METRIC FOR KERAS    ==================
+from keras import backend as K
+def r2_k(y_true, y_pred):
+    SSE = K.sum((y_true - y_pred)**2)
+    SSO = K.sum((y_true - K.mean(y_true))**2)
+    result = 1 - SSE/(SSO + K.epsilon())
+    #K.epsilon() is the 1E-8 that we just add it in the denominator to avoid problems in case SSO is zero
+    return (result)
+#=======    END OF DEFINITION   ================================================================
+
+#=======     IMPORT DATA        ================================================================
+df_inputs = pd.read_excel('/Users/pk1617/PycharmProjects/untitled/KOZeros/186AlternativeKOZeros.xlsx', sheet_name='GenesPI', header = [0], index_col = [0])
+#Inputs are not normalized
+df_outputs = pd.read_excel('/Users/pk1617/PycharmProjects/untitled/KOZeros/186AlternativeKOZeros.xlsx', sheet_name='Glycans', header = [0], index_col = [0])
+
+df_inputs = df_inputs.drop(['Sample8', 'Sample10', 'Sample16', 'Sample8-IgG', 'Sample10-IgG', 'Sample16-IgG'], axis=1)
+df_outputs = df_outputs.drop(['Sample8', 'Sample10', 'Sample16', 'Sample8-IgG', 'Sample10-IgG', 'Sample16-IgG'], axis=1)
+
+number_of_genes = len(df_inputs) #that way the number of PIs is included as well
+number_of_glycans = len(df_outputs)
+
+#arranging the dimensions for NN
+df_inputs = df_inputs.T
+df_outputs = df_outputs.T
+
+#train_inputs, test_inputs, train_outputs, test_outputs = train_test_split(df_inputs, df_outputs, test_size=0.2, random_state=1)
+
+#scaling data
+scaler = StandardScaler()
+
+#Parameters used in the network
+iterations=2000 #epochs
+
+#Build the network
+def SDICL_neural_network():
+    model = Sequential([
+        GaussianNoise(0.1,
+              input_shape=(number_of_genes,)),
+        Dense(units=48,
+              activation='sigmoid'),
+        # input_shape= (number_of_genes + PIs,)),
+        Dropout(0.2),
+        Dense(units=48,
+              activation='relu'),
+        Dense(units=number_of_glycans,
+              activation='softmax')])
+
+    model.compile(
+        optimizer = Adam(lr=0.001),
+        loss = 'mean_squared_error',
+        metrics = [r2_k, 'mae']
+    )
+
+    return model
+
+# Wrap Keras model so it can be used by scikit-learn
+SDICL_ANN = KerasRegressor(build_fn = SDICL_neural_network,
+                                 epochs=2000,
+                                 batch_size= 32,
+                                 verbose = 0)
+
+pipeline = Pipeline([('transformer', scaler), ('estimator', SDICL_ANN)])
+
+c = cross_val_score(pipeline,
+                    df_inputs, df_outputs,
+                    cv= KFold(n_splits= len(df_inputs), shuffle=True, random_state=101), #not including a number in the n_splits means that it's by default set to 5
+                    scoring='neg_mean_absolute_error')
+
+print(c)
+print(c.mean())
